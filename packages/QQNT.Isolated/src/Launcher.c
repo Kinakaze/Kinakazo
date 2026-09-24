@@ -8,7 +8,6 @@
 #include <shlobj.h>
 #include <appmodel.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <wchar.h>
 
 static void logline(HANDLE log, const wchar_t *text) {
@@ -25,12 +24,11 @@ static void logline(HANDLE log, const wchar_t *text) {
 /* Keep the logical AppData path: legacy mkdir implementations inspect every
    ancestor, but AppContainer cannot query the physical Packages\<PFN> root.
    Windows redirects writes here to this package's LocalCache\Local via COW. */
-static BOOL getStatePaths(wchar_t *state, wchar_t *legacy) {
+static BOOL getStatePath(wchar_t *state) {
     wchar_t local[32768], family[256], suffix[512];
     DWORD length = GetEnvironmentVariableW(L"LOCALAPPDATA", local, 32768);
     UINT32 familySize = 256;
     if (!length || length >= 30000 || GetCurrentPackageFamilyName(&familySize, family) != ERROR_SUCCESS) return FALSE;
-    swprintf(legacy, 32768, L"%ls\\QQIsolated", local);
     swprintf(suffix, 512, L"\\Packages\\%ls\\AC", family);
     size_t suffixLength = wcslen(suffix);
     /* Fail closed if the OS no longer supplies the expected AppContainer path. */
@@ -38,80 +36,6 @@ static BOOL getStatePaths(wchar_t *state, wchar_t *legacy) {
     local[length - suffixLength] = 0;
     swprintf(state, 32768, L"%ls\\QQIsolated", local);
     return TRUE;
-}
-
-static wchar_t *childPath(const wchar_t *parent, const wchar_t *name) {
-    size_t count = wcslen(parent) + wcslen(name) + 2;
-    if (count > 32768) { SetLastError(ERROR_FILENAME_EXCED_RANGE); return NULL; }
-    wchar_t *path = malloc(count * sizeof(wchar_t));
-    if (!path) { SetLastError(ERROR_NOT_ENOUGH_MEMORY); return NULL; }
-    swprintf(path, count, L"%ls\\%ls", parent, name);
-    return path;
-}
-
-/* Migrate only this package's previous private data; never follow user links.
-   Keep the source intact so an interrupted copy can be retried before launch. */
-static BOOL copyPrivateState(const wchar_t *source, const wchar_t *target) {
-    wchar_t *pattern = childPath(source, L"*");
-    WIN32_FIND_DATAW entry;
-    if (!pattern) return FALSE;
-    HANDLE search = FindFirstFileW(pattern, &entry);
-    DWORD error = GetLastError();
-    free(pattern);
-    if (search == INVALID_HANDLE_VALUE) { SetLastError(error); return error == ERROR_FILE_NOT_FOUND; }
-    error = ERROR_SUCCESS;
-    do {
-        if (!wcscmp(entry.cFileName, L".") || !wcscmp(entry.cFileName, L"..")) continue;
-        if (entry.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) { error = ERROR_REPARSE_TAG_INVALID; break; }
-        wchar_t *from = childPath(source, entry.cFileName);
-        wchar_t *to = from ? childPath(target, entry.cFileName) : NULL;
-        if (!from || !to) error = GetLastError();
-        else {
-            DWORD targetAttributes = GetFileAttributesW(to);
-            if (targetAttributes != INVALID_FILE_ATTRIBUTES && (targetAttributes & FILE_ATTRIBUTE_REPARSE_POINT)) error = ERROR_REPARSE_TAG_INVALID;
-            else if (entry.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) {
-                if (!CreateDirectoryW(to, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) error = GetLastError();
-                else if (!copyPrivateState(from, to)) error = GetLastError();
-            } else if (!CopyFileW(from, to, FALSE)) error = GetLastError();
-        }
-        free(from);
-        free(to);
-        if (error) break;
-    } while (FindNextFileW(search, &entry));
-    if (!error && GetLastError() != ERROR_NO_MORE_FILES) error = GetLastError();
-    FindClose(search);
-    SetLastError(error);
-    return error == ERROR_SUCCESS;
-}
-
-static BOOL prepareState(const wchar_t *state, const wchar_t *legacy) {
-    wchar_t pending[32768];
-    swprintf(pending, 32768, L"%ls.migration-pending", state);
-    DWORD marker = GetFileAttributesW(pending);
-    if (marker == INVALID_FILE_ATTRIBUTES && GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) return FALSE;
-    if (marker != INVALID_FILE_ATTRIBUTES && (marker & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT))) { SetLastError(ERROR_INVALID_DATA); return FALSE; }
-    DWORD attributes = GetFileAttributesW(state);
-    if (attributes != INVALID_FILE_ATTRIBUTES) {
-        if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) { SetLastError(ERROR_DIRECTORY); return FALSE; }
-        if (marker == INVALID_FILE_ATTRIBUTES) return TRUE;
-    } else if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) return FALSE;
-    attributes = GetFileAttributesW(legacy);
-    if (attributes == INVALID_FILE_ATTRIBUTES) {
-        if (marker != INVALID_FILE_ATTRIBUTES) return FALSE;
-        if (GetLastError() != ERROR_FILE_NOT_FOUND && GetLastError() != ERROR_PATH_NOT_FOUND) return FALSE;
-        return CreateDirectoryW(state, NULL);
-    }
-    if (!(attributes & FILE_ATTRIBUTE_DIRECTORY) || (attributes & FILE_ATTRIBUTE_REPARSE_POINT)) { SetLastError(ERROR_DIRECTORY); return FALSE; }
-    /* AppSilo COW does not support renaming a directory at the AppData root.
-       A marker also prevents partially migrated data from being used by QQ. */
-    HANDLE migration = CreateFileW(pending, GENERIC_WRITE, 0, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (migration == INVALID_HANDLE_VALUE) return FALSE;
-    BOOL ok = CreateDirectoryW(state, NULL) || GetLastError() == ERROR_ALREADY_EXISTS;
-    if (ok) ok = copyPrivateState(legacy, state);
-    DWORD error = GetLastError();
-    CloseHandle(migration);
-    if (!ok) { SetLastError(error); return FALSE; }
-    return DeleteFileW(pending);
 }
 
 /* user.dat supplies the known-folder overlay; AppData keeps the OS COW mapping. */
@@ -159,7 +83,7 @@ static BOOL redirectProfile(const wchar_t *state, HANDLE log) {
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show) {
-    wchar_t root[32768], state[32768], legacy[32768], logpath[32768], exe[32768], cmd[32768], message[1024];
+    wchar_t root[32768], state[32768], logpath[32768], exe[32768], cmd[32768], message[1024];
     HANDLE token = NULL;
     DWORD size, container = 0;
     if (!OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &token)) return 10;
@@ -174,9 +98,9 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show
     wchar_t *slash = wcsrchr(root, L'\\');
     if (!slash) return 12;
     *slash = 0;
-    if (!getStatePaths(state, legacy)) return 13;
-    if (!prepareState(state, legacy)) {
-        swprintf(message, 1024, L"无法准备隔离数据目录（错误 %lu）。原有数据已保留。", GetLastError());
+    if (!getStatePath(state)) return 13;
+    if (!CreateDirectoryW(state, NULL) && GetLastError() != ERROR_ALREADY_EXISTS) {
+        swprintf(message, 1024, L"无法创建隔离数据目录（错误 %lu）。", GetLastError());
         MessageBoxW(NULL, message, L"QQNT.Isolated", MB_ICONERROR);
         return 15;
     }
