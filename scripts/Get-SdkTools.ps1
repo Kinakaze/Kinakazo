@@ -10,8 +10,7 @@ if (-not (Test-Path -LiteralPath (Join-Path $bin 'signtool.exe'))) {
     New-Item -ItemType Directory -Path $cache -Force | Out-Null
     $archive = Join-Path $cache "sdk-$version.nupkg"
     if (-not (Test-Path -LiteralPath $archive) -or (Get-FileHash -LiteralPath $archive).Hash -ne $sha256) {
-        $ProgressPreference = 'SilentlyContinue'
-        Invoke-WebRequest -UseBasicParsing -Uri "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/$version/microsoft.windows.sdk.buildtools.$version.nupkg" -OutFile $archive
+        & (Join-Path $PSScriptRoot 'Download-File.ps1') -Url "https://api.nuget.org/v3-flatcontainer/microsoft.windows.sdk.buildtools/$version/microsoft.windows.sdk.buildtools.$version.nupkg" -OutputPath $archive -Sha256 $sha256
     }
     if ((Get-FileHash -LiteralPath $archive).Hash -ne $sha256) { throw 'Windows SDK archive SHA-256 does not match the pinned version.' }
     Add-Type -AssemblyName System.IO.Compression.FileSystem

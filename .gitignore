@@ -5,6 +5,7 @@ tools/
 *.pfx
 *.log
 *.cer
+!certificates/Kinakaze.cer
 *.exe
 *.dll
 *.zip

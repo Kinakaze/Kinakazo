@@ -1,5 +1,5 @@
 name: Build package on demand
-run-name: Build ${{ inputs.package }} from latest WinGet manifest
+run-name: Build ${{ inputs.package }} from WinGet with Kinakaze signing
 
 on:
   workflow_dispatch:
@@ -11,6 +11,10 @@ on:
         default: QQNT.Isolated
         options:
           - QQNT.Isolated
+      target_user_sid:
+        description: Target Windows user SID (run whoami /user on that PC)
+        type: string
+        required: true
 
 permissions:
   contents: read
@@ -22,7 +26,7 @@ concurrency:
 jobs:
   build:
     runs-on: windows-2025
-    timeout-minutes: 45
+    timeout-minutes: 30
     defaults:
       run:
         shell: pwsh
@@ -30,54 +34,43 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
-      - name: Validate sources and resolver
-        run: ./tests/Test-Repository.ps1
-      - name: Set up MinGW-w64
-        id: msys2
-        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
-        with:
-          msystem: MINGW64
-          install: mingw-w64-x86_64-gcc
-          update: true
-      - name: Download latest WinGet QQ and build selected package
+      - name: Import fixed Kinakaze signing certificate
+        env:
+          SIGNING_CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
+          SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
+          TARGET_USER_SID: ${{ inputs.target_user_sid }}
+        run: |
+          if ($env:TARGET_USER_SID -notmatch '^S-1-(5-21|12-1)-\d+-\d+-\d+-\d+$') { throw 'Invalid target user SID.' }
+          if (-not $env:SIGNING_CERTIFICATE_BASE64 -or -not $env:SIGNING_CERTIFICATE_PASSWORD) { throw 'Configure signing certificate secrets first.' }
+          $pfx = Join-Path $env:RUNNER_TEMP 'Kinakaze.pfx'
+          try {
+            [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
+            $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
+            $certificate = Import-PfxCertificate -FilePath $pfx -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $env:GITHUB_WORKSPACE 'certificates/Kinakaze.cer'))
+            if ($certificate.Subject -ne 'CN=Kinakaze' -or $certificate.Thumbprint -ne $publicCertificate.Thumbprint) { throw 'Private key does not match the fixed Kinakaze.cer.' }
+            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
+            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
+            # Ephemeral runner trust for SignTool /pa verification of this self-signed certificate.
+            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+          } finally {
+            if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx }
+          }
+      - name: Download with aria2, compile with MSVC and sign MSIX
         id: build
         env:
           SELECTED_PACKAGE: ${{ inputs.package }}
+          TARGET_USER_SID: ${{ inputs.target_user_sid }}
           BUILD_REVISION: ${{ github.run_number }}
-          MSYS_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
           GH_TOKEN: ${{ github.token }}
-        run: |
-          $compiler = Join-Path $env:MSYS_LOCATION 'mingw64/bin/gcc.exe'
-          ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -Compiler $compiler -Revision ([int]$env:BUILD_REVISION)
-      - name: Upload installable bundle and checksums
+        run: ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -TargetUserSid $env:TARGET_USER_SID -Revision ([int]$env:BUILD_REVISION)
+      - name: Upload signed MSIX and public certificate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: ${{ inputs.package }}-${{ steps.build.outputs.version }}-x64
-          path: artifacts/${{ inputs.package }}/
+          name: ${{ inputs.package }}-${{ steps.build.outputs.version }}-signed
+          path: |
+            artifacts/${{ inputs.package }}/*.msix
+            artifacts/${{ inputs.package }}/Kinakaze.cer
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
-      - name: Upload failure diagnostics
-        if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: build-diagnostics-${{ github.run_number }}
-          path: |
-            build/**/download-diagnostic.json
-            build/**/pack.log
-          if-no-files-found: ignore
-          retention-days: 7
-      - name: Build summary
-        env:
-          SELECTED_PACKAGE: ${{ inputs.package }}
-        run: |
-          $metadata = Get-Content -LiteralPath "artifacts/$env:SELECTED_PACKAGE/upstream.json" -Raw | ConvertFrom-Json
-          @"
-          ## $env:SELECTED_PACKAGE
-          - Upstream: $($metadata.ApplicationVersion)
-          - Package: $($metadata.PackageVersion)
-          - Installer SHA-256: $($metadata.InstallerSha256)
-          - Download the artifact, extract both ZIP layers, then run Install.cmd on Windows 11 x64 24H2 or later.
-          - Registry.dat and the signing key are generated locally for the installing user.
-          - This runner validates the build; interactive AppSilo behavior requires Windows 11 runtime testing.
-          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

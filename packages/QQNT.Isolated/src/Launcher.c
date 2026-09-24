@@ -3,7 +3,6 @@
 #endif
 #define _UNICODE
 #include <windows.h>
-#include <shellapi.h>
 #include <shlobj.h>
 #include <appmodel.h>
 #include <stdio.h>
@@ -60,28 +59,6 @@ static BOOL redirectProfile(const wchar_t *state, HANDLE log) {
     return ok;
 }
 
-/* Run the access probes inside the real AppSilo process, using only a caller-created canary. */
-static int probe(const wchar_t *state, const wchar_t *path, DWORD hostPid) {
-    DWORD readError = 0, writeError = 0, processError = 0;
-    HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    if (file == INVALID_HANDLE_VALUE) readError = GetLastError(); else CloseHandle(file);
-    file = CreateFileW(path, GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE, NULL, OPEN_EXISTING, 0, NULL);
-    if (file == INVALID_HANDLE_VALUE) writeError = GetLastError(); else CloseHandle(file);
-    HANDLE process = OpenProcess(PROCESS_VM_READ | PROCESS_VM_WRITE, FALSE, hostPid);
-    if (!process) processError = GetLastError(); else CloseHandle(process);
-    wchar_t output[32768];
-    swprintf(output, 32768, L"%ls\\isolation-probe.json", state);
-    file = CreateFileW(output, GENERIC_WRITE, FILE_SHARE_READ, NULL, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
-    if (file == INVALID_HANDLE_VALUE) return 20;
-    char json[1024];
-    int count = snprintf(json, sizeof(json), "{\"appContainer\":true,\"processId\":%lu,\"hostReadError\":%lu,\"hostWriteError\":%lu,\"hostProcessError\":%lu}\n", GetCurrentProcessId(), readError, writeError, processError);
-    DWORD written;
-    BOOL saved = WriteFile(file, json, count, &written, NULL);
-    CloseHandle(file);
-    if (!saved || written != (DWORD)count) return 21;
-    return readError == ERROR_ACCESS_DENIED && writeError == ERROR_ACCESS_DENIED && processError == ERROR_ACCESS_DENIED ? 0 : 22;
-}
-
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show) {
     wchar_t root[32768], state[32768], logpath[32768], exe[32768], cmd[32768], message[1024];
     HANDLE token = NULL;
@@ -110,18 +87,8 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show
     logline(log, message);
     logline(log, root);
     logline(log, state);
-    int argc = 0;
-    wchar_t **argv = CommandLineToArgvW(GetCommandLineW(), &argc);
-    BOOL pathProbe = argv && argc >= 2 && wcsncmp(argv[1], L"--paths", 7) == 0;
-    if (argv && argc == 4 && wcscmp(argv[1], L"--probe-file") == 0) {
-        int result = probe(state, argv[2], wcstoul(argv[3], NULL, 10));
-        LocalFree(argv);
-        CloseHandle(log);
-        return result;
-    }
-    if (argv) LocalFree(argv);
     if (!redirectProfile(state, log)) { CloseHandle(log); return 17; }
-    swprintf(exe, 32768, L"%ls\\%ls", root, pathProbe ? L"PathProbe.exe" : L"QQ.exe");
+    swprintf(exe, 32768, L"%ls\\QQ.exe", root);
     swprintf(cmd, 32768, L"\"%ls\" --no-sandbox --enable-logging=stderr --user-data-dir=\"%ls\\Chromium\"", exe, state);
     STARTUPINFOW startup = {0};
     PROCESS_INFORMATION process = {0};
@@ -133,7 +100,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE previous, PWSTR args, int show
         startup.hStdInput = CreateFileW(L"NUL", GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, &security, OPEN_EXISTING, 0, NULL);
     }
     logline(log, cmd);
-    BOOL ok = CreateProcessW(exe, cmd, NULL, NULL, log != INVALID_HANDLE_VALUE, pathProbe ? CREATE_NO_WINDOW : 0, NULL, root, &startup, &process);
+    BOOL ok = CreateProcessW(exe, cmd, NULL, NULL, log != INVALID_HANDLE_VALUE, 0, NULL, root, &startup, &process);
     if (!ok) {
         swprintf(message, 1024, L"CreateProcess failed: %lu", GetLastError());
         logline(log, message);

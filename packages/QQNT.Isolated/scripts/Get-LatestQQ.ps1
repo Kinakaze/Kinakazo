@@ -14,18 +14,8 @@ $release = & (Join-Path $PSScriptRoot 'Resolve-QQ.ps1')
 Write-Host "Downloading WinGet $($release.WingetId) $($release.WingetVersion) x64"
 Write-Host "WinGet installer URL: $($release.Url)"
 $installer = Join-Path $output 'QQ-installer.exe'
-$downloaded = $false
-for ($attempt=1; $attempt -le 3; $attempt++) {
-    try {
-        Invoke-WebRequest -UseBasicParsing -Uri $release.Url -OutFile $installer -TimeoutSec 600 -Headers @{ Referer=$release.Homepage } -UserAgent 'Mozilla/5.0'
-        $downloaded = $true
-        break
-    } catch {
-        if ($attempt -eq 3) { throw "Latest QQ $($release.Version) could not be downloaded from $($release.Url): $($_.Exception.Message)" }
-        Start-Sleep -Seconds (2 * $attempt)
-    }
-}
-if (-not $downloaded) { throw 'QQ download failed.' }
+$repoRoot = Split-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) -Parent
+& (Join-Path $repoRoot 'scripts\Download-File.ps1') -Url $release.Url -OutputPath $installer -Sha256 $release.InstallerSha256 -Referer $release.Homepage
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
 $actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
 $diagnostic = [pscustomobject]@{

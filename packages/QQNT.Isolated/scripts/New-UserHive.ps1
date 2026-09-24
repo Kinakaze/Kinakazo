@@ -1,5 +1,9 @@
-param([Parameter(Mandatory)][string]$OutputPath, [switch]$Machine)
+param([Parameter(Mandatory)][string]$OutputPath, [switch]$Machine, [string]$UserSid)
 $ErrorActionPreference = 'Stop'
+if ($Machine) {
+    if (-not $UserSid) { throw 'A target user SID is required; the build runner SID must not be used.' }
+    $UserSid = [Security.Principal.SecurityIdentifier]::new($UserSid).Value
+}
 if (-not ('QQIsolation.OfflineRegistry' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -42,4 +46,4 @@ namespace QQIsolation {
 }
 '@
 }
-[QQIsolation.OfflineRegistry]::Create([IO.Path]::GetFullPath($OutputPath), [Security.Principal.WindowsIdentity]::GetCurrent().User.Value, $Machine.IsPresent)
+[QQIsolation.OfflineRegistry]::Create([IO.Path]::GetFullPath($OutputPath), $UserSid, $Machine.IsPresent)
