@@ -38,4 +38,3 @@
     <rescap:Capability Name="isolatedWin32-volumeRootMinimal" />
   </Capabilities>
 </Package>
-

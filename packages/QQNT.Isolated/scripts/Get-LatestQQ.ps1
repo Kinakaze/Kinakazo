@@ -12,6 +12,7 @@ if (Test-Path -LiteralPath $output) { throw 'Download directory must be new to p
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $release = & (Join-Path $PSScriptRoot 'Resolve-QQ.ps1')
 Write-Host "Downloading official QQ $($release.Version) x64"
+Write-Host "Official installer URL: $($release.Url)"
 $installer = Join-Path $output 'QQ-installer.exe'
 $downloaded = $false
 for ($attempt=1; $attempt -le 3; $attempt++) {
@@ -26,7 +27,16 @@ for ($attempt=1; $attempt -le 3; $attempt++) {
 }
 if (-not $downloaded) { throw 'QQ download failed.' }
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
-if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?i)Tencent') { throw 'QQ installer must have a valid Tencent Authenticode signature.' }
+$diagnostic = [pscustomobject]@{
+    Release=$release; Length=(Get-Item -LiteralPath $installer).Length
+    SignatureStatus=$signature.Status.ToString(); SignatureMessage=$signature.StatusMessage
+    Signer=$signature.SignerCertificate.Subject; Sha256=(Get-FileHash -LiteralPath $installer).Hash
+}
+$diagnostic | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'download-diagnostic.json') -Encoding UTF8
+if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?i)Tencent') {
+    $diagnostic | ConvertTo-Json -Depth 5 | Write-Host
+    throw 'QQ installer must have a valid Tencent Authenticode signature.'
+}
 $release | Add-Member -NotePropertyName InstallerSha256 -NotePropertyValue (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
 $release | Add-Member -NotePropertyName Signer -NotePropertyValue $signature.SignerCertificate.Subject
 $extract = Join-Path $output 'extracted'

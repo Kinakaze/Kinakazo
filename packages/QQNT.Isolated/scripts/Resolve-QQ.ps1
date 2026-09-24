@@ -2,7 +2,10 @@
 param([string]$ConfigText)
 $ErrorActionPreference = 'Stop'
 $metadata = Get-Content -LiteralPath (Join-Path (Split-Path $PSScriptRoot -Parent) 'package.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if (-not $ConfigText) { $ConfigText = (Invoke-WebRequest -UseBasicParsing -Uri $metadata.configUrl -TimeoutSec 60).Content }
+if (-not $ConfigText) {
+    $freshUrl = $metadata.configUrl + '?t=' + [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds()
+    $ConfigText = (Invoke-WebRequest -UseBasicParsing -Uri $freshUrl -TimeoutSec 60 -Headers @{ 'Cache-Control'='no-cache'; Pragma='no-cache' }).Content
+}
 # Extract only the JSON object; never execute JavaScript from the download site.
 $match = [regex]::Match($ConfigText, '(?s)\bvar\s+params\s*=\s*(\{.*?\})\s*;')
 if (-not $match.Success) { throw 'The official QQ download configuration format has changed.' }

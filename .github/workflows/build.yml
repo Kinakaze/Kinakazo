@@ -56,6 +56,16 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: build-diagnostics-${{ github.run_number }}
+          path: |
+            build/**/download-diagnostic.json
+            build/**/pack.log
+          if-no-files-found: ignore
+          retention-days: 7
       - name: Build summary
         env:
           SELECTED_PACKAGE: ${{ inputs.package }}
