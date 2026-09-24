@@ -4,7 +4,7 @@ Windows 应用原生隔离打包仓库。
 
 ## 安装使用
 
-需要 Windows 11 x64 24H2 或更高版本，安装包需为当前 Windows 用户 SID 构建。
+需要 Windows 11 x64 24H2 或更高版本。同一安装包适用于不同 Windows 用户，无需提供 SID。
 
 从 [Actions](https://github.com/Kinakaze/Kinakazo/actions/workflows/build.yml) 下载并解压构建产物，然后：
 

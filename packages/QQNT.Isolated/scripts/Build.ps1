@@ -1,6 +1,5 @@
 [CmdletBinding()]
 param(
-    [Parameter(Mandatory)][ValidatePattern('^S-1-(5-21|12-1)-\d+-\d+-\d+-\d+$')][string]$TargetUserSid,
     [string]$SourceDirectory, [string]$Compiler = 'cl.exe', [string]$SevenZip,
     [string]$SdkDirectory, [string]$OutputDirectory,
     [ValidateRange(0,65535)][int]$Revision = 0
@@ -36,7 +35,8 @@ if ($SourceDirectory) {
 }
 $payload = Join-Path $work 'payload'
 New-Item -ItemType Directory -Path $payload -Force | Out-Null
-& robocopy.exe $source $payload /E /XF *.zip qqcatch.exe *.log Uninstall.exe Uninstall.xml /NFL /NDL /NJH /NJS /NP | Out-Null
+# Never reuse packaging metadata or a machine hive from a previous isolated build.
+& robocopy.exe $source $payload /E /XF *.zip qqcatch.exe *.log Uninstall.exe Uninstall.xml User.dat Registry.dat QQIsolated.exe AppxManifest.xml AppxBlockMap.xml AppxSignature.p7x /NFL /NDL /NJH /NJS /NP | Out-Null
 if ($LASTEXITCODE -ge 8) { throw "QQ copy failed: $LASTEXITCODE" }
 Copy-Item -Path (Join-Path $packageRoot 'layout\*') -Destination $payload -Recurse -Force
 $manifestPath = Join-Path $payload 'AppxManifest.xml'
@@ -51,7 +51,6 @@ $compileArguments = @('/nologo','/O2','/MT','/W3','/utf-8','/DUNICODE','/D_UNICO
 & $Compiler @compileArguments | Out-Host
 if ($LASTEXITCODE -ne 0) { throw 'MSVC launcher compilation failed.' }
 & (Join-Path $PSScriptRoot 'New-UserHive.ps1') -OutputPath (Join-Path $payload 'User.dat')
-& (Join-Path $PSScriptRoot 'New-UserHive.ps1') -OutputPath (Join-Path $payload 'Registry.dat') -Machine -UserSid $TargetUserSid
 if (-not $OutputDirectory) { $OutputDirectory = Join-Path $repoRoot 'artifacts\QQNT.Isolated' }
 New-Item -ItemType Directory -Path $OutputDirectory -Force | Out-Null
 $artifact = Join-Path ([IO.Path]::GetFullPath($OutputDirectory)) "QQNT.Isolated-$packageVersion-x64.msix"
@@ -75,9 +74,9 @@ if ($env:GITHUB_STEP_SUMMARY) {
 - Publisher: CN=Kinakaze
 - Certificate: $($certificate.Thumbprint)
 - MSIX SHA-256: $digest
-- Target user SID: $TargetUserSid
 - Trust Kinakaze.cer in Local Machine / Trusted People, then install the MSIX.
-- The native profile mapping is for the target user SID. Windows 11 x64 24H2 or later is required.
+- User folders are resolved at launch; the same package supports different Windows users.
+- Windows 11 x64 24H2 or later is required.
 "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
 }
 [pscustomobject]@{ Artifact=$artifact; Version=$packageVersion; Sha256=$digest; Certificate=$certificate.Thumbprint }

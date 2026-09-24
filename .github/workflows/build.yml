@@ -11,10 +11,6 @@ on:
         default: QQNT.Isolated
         options:
           - QQNT.Isolated
-      target_user_sid:
-        description: Target Windows user SID (run whoami /user on that PC)
-        type: string
-        required: true
 
 permissions:
   contents: read
@@ -39,9 +35,7 @@ jobs:
         env:
           SIGNING_CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
-          TARGET_USER_SID: ${{ inputs.target_user_sid }}
         run: |
-          if ($env:TARGET_USER_SID -notmatch '^S-1-(5-21|12-1)-\d+-\d+-\d+-\d+$') { throw 'Invalid target user SID.' }
           if (-not $env:SIGNING_CERTIFICATE_BASE64 -or -not $env:SIGNING_CERTIFICATE_PASSWORD) { throw 'Configure signing certificate secrets first.' }
           $pfx = Join-Path $env:RUNNER_TEMP 'Kinakaze.pfx'
           try {
@@ -69,10 +63,9 @@ jobs:
         id: build
         env:
           SELECTED_PACKAGE: ${{ inputs.package }}
-          TARGET_USER_SID: ${{ inputs.target_user_sid }}
           BUILD_REVISION: ${{ github.run_number }}
           GH_TOKEN: ${{ github.token }}
-        run: ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -TargetUserSid $env:TARGET_USER_SID -Revision ([int]$env:BUILD_REVISION)
+        run: ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -Revision ([int]$env:BUILD_REVISION)
       - name: Upload signed MSIX and public certificate
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:

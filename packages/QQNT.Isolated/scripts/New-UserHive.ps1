@@ -1,9 +1,5 @@
-param([Parameter(Mandatory)][string]$OutputPath, [switch]$Machine, [string]$UserSid)
+param([Parameter(Mandatory)][string]$OutputPath)
 $ErrorActionPreference = 'Stop'
-if ($Machine) {
-    if (-not $UserSid) { throw 'A target user SID is required; the build runner SID must not be used.' }
-    $UserSid = [Security.Principal.SecurityIdentifier]::new($UserSid).Value
-}
 if (-not ('QQIsolation.OfflineRegistry' -as [type])) {
     Add-Type -TypeDefinition @'
 using System;
@@ -19,12 +15,12 @@ namespace QQIsolation {
         [DllImport("offreg.dll")] static extern uint ORCloseHive(IntPtr hive);
         [DllImport("offreg.dll")] static extern uint ORCloseKey(IntPtr key);
         static void Check(uint result) { if (result != 0) throw new Win32Exception((int)result); }
-        public static void Create(string file, string sid, bool machine) {
+        public static void Create(string file) {
             IntPtr hive;
             Check(ORCreateHive(out hive));
             try {
                 IntPtr key = hive; uint disposition;
-                string keyPath = machine ? @"REGISTRY\MACHINE\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList\" + sid : @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
+                string keyPath = @"Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders";
                 foreach (string part in keyPath.Split('\\')) {
                     IntPtr child;
                     Check(ORCreateKey(key, part, null, 0, IntPtr.Zero, out child, out disposition));
@@ -32,10 +28,10 @@ namespace QQIsolation {
                     key = child;
                 }
                 try {
-                    string[] names = machine ? new string[]{"ProfileImagePath"} : new string[]{"Personal", "Desktop", "My Pictures", "My Music", "My Video", "{374DE290-123F-4565-9164-39C4925E467B}", "AppData", "Local AppData"};
-                    string[] dirs = machine ? new string[]{""} : new string[]{"Documents", "Desktop", "Pictures", "Music", "Videos", "Downloads", @"AppData\Roaming", @"AppData\Local"};
+                    string[] names = {"Personal", "Desktop", "My Pictures", "My Music", "My Video", "{374DE290-123F-4565-9164-39C4925E467B}", "AppData", "Local AppData"};
+                    string[] dirs = {"Documents", "Desktop", "Pictures", "Music", "Videos", "Downloads", @"AppData\Roaming", @"AppData\Local"};
                     for (int i=0; i<names.Length; i++) {
-                        byte[] data = Encoding.Unicode.GetBytes("%QQ_ISOLATED_PROFILE%" + (dirs[i].Length == 0 ? "" : @"\" + dirs[i]) + "\0");
+                        byte[] data = Encoding.Unicode.GetBytes(@"%QQ_ISOLATED_PROFILE%\" + dirs[i] + "\0");
                         Check(ORSetValue(key, names[i], 2, data, (uint)data.Length));
                     }
                 } finally { ORCloseKey(key); }
@@ -46,4 +42,4 @@ namespace QQIsolation {
 }
 '@
 }
-[QQIsolation.OfflineRegistry]::Create([IO.Path]::GetFullPath($OutputPath), $UserSid, $Machine.IsPresent)
+[QQIsolation.OfflineRegistry]::Create([IO.Path]::GetFullPath($OutputPath))
