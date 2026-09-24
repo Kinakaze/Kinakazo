@@ -35,6 +35,7 @@ jobs:
         with:
           persist-credentials: false
       - name: Import fixed Kinakaze signing certificate
+        timeout-minutes: 3
         env:
           SIGNING_CERTIFICATE_BASE64: ${{ secrets.SIGNING_CERTIFICATE_BASE64 }}
           SIGNING_CERTIFICATE_PASSWORD: ${{ secrets.SIGNING_CERTIFICATE_PASSWORD }}
@@ -47,12 +48,14 @@ jobs:
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
             $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
             $certificate = Import-PfxCertificate -FilePath $pfx -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            Write-Host 'Imported the signing key.'
             $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $env:GITHUB_WORKSPACE 'certificates/Kinakaze.cer'))
             if ($certificate.Subject -ne 'CN=Kinakaze' -or $certificate.Thumbprint -ne $publicCertificate.Thumbprint) { throw 'Private key does not match the fixed Kinakaze.cer.' }
-            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\LocalMachine\TrustedPeople | Out-Null
-            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\CurrentUser\TrustedPeople | Out-Null
-            # Ephemeral runner trust for SignTool /pa verification of this self-signed certificate.
-            Import-Certificate -FilePath certificates/Kinakaze.cer -CertStoreLocation Cert:\CurrentUser\Root | Out-Null
+            # Force noninteractive trust on this disposable runner; no certificate UI is available.
+            certutil.exe -f -addstore TrustedPeople certificates/Kinakaze.cer
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to trust the package certificate.' }
+            certutil.exe -user -f -addstore Root certificates/Kinakaze.cer
+            if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare Authenticode verification trust.' }
           } finally {
             if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx }
           }
