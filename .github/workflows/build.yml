@@ -1,0 +1,72 @@
+name: Build package on demand
+run-name: Build ${{ inputs.package }} from latest upstream
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to build
+        type: choice
+        required: true
+        default: QQNT.Isolated
+        options:
+          - QQNT.Isolated
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-${{ inputs.package }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: windows-2025
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - name: Set up MinGW-w64
+        id: msys2
+        uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
+        with:
+          msystem: MINGW64
+          install: mingw-w64-x86_64-gcc
+          update: true
+      - name: Validate sources and resolver
+        run: ./tests/Test-Repository.ps1
+      - name: Download latest QQ and build selected package
+        id: build
+        env:
+          SELECTED_PACKAGE: ${{ inputs.package }}
+          BUILD_REVISION: ${{ github.run_number }}
+          MSYS_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+        run: |
+          $compiler = Join-Path $env:MSYS_LOCATION 'mingw64/bin/gcc.exe'
+          ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -Compiler $compiler -Revision ([int]$env:BUILD_REVISION)
+      - name: Upload installable bundle and checksums
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ inputs.package }}-${{ steps.build.outputs.version }}-x64
+          path: artifacts/${{ inputs.package }}/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+      - name: Build summary
+        env:
+          SELECTED_PACKAGE: ${{ inputs.package }}
+        run: |
+          $metadata = Get-Content -LiteralPath "artifacts/$env:SELECTED_PACKAGE/upstream.json" -Raw | ConvertFrom-Json
+          @"
+          ## $env:SELECTED_PACKAGE
+          - Upstream: $($metadata.ApplicationVersion)
+          - Package: $($metadata.PackageVersion)
+          - Installer SHA-256: $($metadata.InstallerSha256)
+          - Download the artifact, extract both ZIP layers, then run Install.cmd on Windows 11 x64 24H2 or later.
+          - Registry.dat and the signing key are generated locally for the installing user.
+          - This runner validates the build; interactive AppSilo behavior requires Windows 11 runtime testing.
+          "@ | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8

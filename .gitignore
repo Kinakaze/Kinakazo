@@ -1,0 +1,15 @@
+build/
+dumps/
+tools/
+*.msix
+*.pfx
+*.log
+*.cer
+*.exe
+*.dll
+*.zip
+*.nupkg
+artifacts/
+.cache/
+/catcher.cs
+/VERIFICATION.md
