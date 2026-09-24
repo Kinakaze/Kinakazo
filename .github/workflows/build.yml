@@ -46,15 +46,21 @@ jobs:
           $pfx = Join-Path $env:RUNNER_TEMP 'Kinakaze.pfx'
           try {
             [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:SIGNING_CERTIFICATE_BASE64))
-            $password = ConvertTo-SecureString $env:SIGNING_CERTIFICATE_PASSWORD -AsPlainText -Force
-            $certificate = Import-PfxCertificate -FilePath $pfx -Password $password -CertStoreLocation Cert:\CurrentUser\My
+            # Import only this leaf and its key; PFX chain import can open a root-trust dialog.
+            $flags = [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::UserKeySet -bor [Security.Cryptography.X509Certificates.X509KeyStorageFlags]::PersistKeySet
+            $certificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new($pfx, $env:SIGNING_CERTIFICATE_PASSWORD, $flags)
+            $store = [Security.Cryptography.X509Certificates.X509Store]::new('My', 'CurrentUser')
+            try {
+              $store.Open([Security.Cryptography.X509Certificates.OpenFlags]::ReadWrite)
+              $store.Add($certificate)
+            } finally { $store.Close() }
             Write-Host 'Imported the signing key.'
             $publicCertificate = [Security.Cryptography.X509Certificates.X509Certificate2]::new((Join-Path $env:GITHUB_WORKSPACE 'certificates/Kinakaze.cer'))
             if ($certificate.Subject -ne 'CN=Kinakaze' -or $certificate.Thumbprint -ne $publicCertificate.Thumbprint) { throw 'Private key does not match the fixed Kinakaze.cer.' }
             # Force noninteractive trust on this disposable runner; no certificate UI is available.
             certutil.exe -f -addstore TrustedPeople certificates/Kinakaze.cer
             if ($LASTEXITCODE -ne 0) { throw 'Failed to trust the package certificate.' }
-            certutil.exe -user -f -addstore Root certificates/Kinakaze.cer
+            certutil.exe -f -addstore Root certificates/Kinakaze.cer
             if ($LASTEXITCODE -ne 0) { throw 'Failed to prepare Authenticode verification trust.' }
           } finally {
             if (Test-Path -LiteralPath $pfx) { Remove-Item -LiteralPath $pfx }
