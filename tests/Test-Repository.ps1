@@ -10,31 +10,45 @@ foreach ($directory in @('scripts','packages','tests')) {
     }
 }
 $resolve = Join-Path $root 'packages\QQNT.Isolated\scripts\Resolve-QQ.ps1'
-function Config([string]$url, [string]$version='9.9.99') {
-    'var params=' + (@{version=$version;updateDate='2026-01-01';ntDownloadX64Url=$url} | ConvertTo-Json -Compress) + '; this.define && define(function(){return params});'
+function Manifest([string]$url, [string]$version='9.9.99.100', [string]$hash=('A' * 64)) {
+    @"
+PackageIdentifier: Tencent.QQ.NT
+PackageVersion: $version
+Installers:
+- Architecture: x86
+  InstallerUrl: https://qqdl.gtimg.cn/QQ_9.9.99_x86.exe
+  InstallerSha256: $('B' * 64)
+- Architecture: x64
+  InstallerUrl: $url
+  InstallerSha256: $hash
+- Architecture: arm64
+  InstallerUrl: https://qqdl.gtimg.cn/QQ_9.9.99_arm64.exe
+  InstallerSha256: $('C' * 64)
+ManifestType: installer
+ManifestVersion: 1.12.0
+"@
 }
-$valid = Config 'https://qqdl.gtimg.cn/qqfile/QQNTV2/9.9.99/release/test/QQ_9.9.99_260101_x64_01.exe'
-$resolved = & $resolve -ConfigText $valid
-if ($resolved.Version -ne '9.9.99' -or $resolved.Url -notlike '*x64_01.exe') { throw 'Official QQ metadata resolution failed.' }
+$valid = Manifest 'https://qqdl.gtimg.cn/qqfile/QQNT/9.9.99/release/test/QQ_9.9.99_260101_x64_01.exe'
+$versions = '[{"name":"9.9.9.999","type":"dir"},{"name":"9.9.99.100","type":"dir"},{"name":"9.9.100-preview","type":"dir"}]'
+$resolved = & $resolve -ManifestText $valid -VersionsJson $versions
+if ($resolved.WingetVersion -ne '9.9.99.100' -or $resolved.Url -notlike '*x64_01.exe' -or $resolved.InstallerSha256 -ne ('A' * 64)) { throw 'WinGet version ordering or x64/hash resolution failed.' }
 $invalidCases = @(
-    'not JavaScript configuration',
-    (Config 'http://qqdl.gtimg.cn/QQ_9.9.99_x64.exe'),
-    (Config 'https://qqdl.gtimg.cn.evil.example/QQ_9.9.99_x64.exe'),
-    (Config 'https://qqdl.gtimg.cn@evil.example/QQ_9.9.99_x64.exe'),
-    (Config 'https://qqdl.gtimg.cn/QQ_9.9.99_x86.exe'),
-    (Config 'https://qqdl.gtimg.cn/QQ_9.9.98_x64.exe'),
-    (Config 'https://qqdl.gtimg.cn/QQ_9.9.99_x64.exe' 'bad-version')
+    'not a WinGet manifest',
+    (Manifest 'http://qqdl.gtimg.cn/QQ_9.9.99_x64.exe'),
+    (Manifest 'https://qqdl.gtimg.cn.evil.example/QQ_9.9.99_x64.exe'),
+    (Manifest 'https://qqdl.gtimg.cn@evil.example/QQ_9.9.99_x64.exe'),
+    (Manifest 'https://qqdl.gtimg.cn/QQ_9.9.99_x86.exe'),
+    (Manifest 'https://qqdl.gtimg.cn/QQ_9.9.98_x64.exe'),
+    (Manifest 'https://qqdl.gtimg.cn/QQ_9.9.99_x64.exe' 'bad-version'),
+    (Manifest 'https://qqdl.gtimg.cn/QQ_9.9.99_x64.exe' '9.9.99.100' 'invalid-hash'),
+    ($valid.Replace('Architecture: x64','Architecture: x86')),
+    ($valid.Replace('PackageIdentifier: Tencent.QQ.NT','PackageIdentifier: Wrong.Package'))
 )
 foreach ($text in $invalidCases) {
     $rejected = $false
-    try { & $resolve -ConfigText $text | Out-Null } catch { $rejected = $true }
+    try { & $resolve -ManifestText $text | Out-Null } catch { $rejected = $true }
     if (-not $rejected) { throw "Resolver accepted invalid upstream metadata: $text" }
 }
-# The resolver treats trailing JavaScript as data and does not execute it.
-$global:KinakazoUnexpectedExecution = $false
-& $resolve -ConfigText ($valid + '; $global:KinakazoUnexpectedExecution = $true') | Out-Null
-if ($global:KinakazoUnexpectedExecution) { throw 'Resolver executed configuration code.' }
-Remove-Variable KinakazoUnexpectedExecution -Scope Global
 $rejected = $false
 try { & (Join-Path $root 'scripts\Build-Package.ps1') -Package '..\escape' | Out-Null } catch { $rejected = $true }
 if (-not $rejected) { throw 'Package selector accepted path traversal.' }

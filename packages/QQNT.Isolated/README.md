@@ -64,6 +64,20 @@ Profile 包含独立的文档、桌面、下载、图片、音乐、视频、App
 .\scripts\Build-Package.ps1 -Package QQNT.Isolated -Compiler 'C:\msys64\mingw64\bin\gcc.exe' -Revision 1
 ```
 
-默认获取官网最新 x64 安装器，只解压而不执行安装器。也可以指定 `-SourceDirectory` 使用已有完整 QQ 目录。产物为可跨账户准备安装的 ZIP；版本、下载地址及安装器 SHA-256 见产物 `upstream.json`。
+默认从 WinGet 的 Tencent.QQ.NT 清单解析最新 x64 下载地址，下载并强制校验清单中的 SHA-256，只解压而不执行安装器。也可以指定 `-SourceDirectory` 使用已有完整 QQ 目录。产物为可跨账户准备安装的 ZIP；版本、清单来源、下载地址及安装器 SHA-256 见产物 `upstream.json`。本地访问 GitHub API 遇到限流时，可设置临时 GH_TOKEN；CI 自带只读令牌，无需配置 PAT。
+
+## 按需 CI
+
+在 GitHub Actions 的 **Build package on demand → Run workflow** 中选择 `QQNT.Isolated`，或执行：
+
+```sh
+gh workflow run build.yml --repo Kinakaze/Kinakazo -f package=QQNT.Isolated
+```
+
+工作流只在手动触发时构建选中的包，不设置 push、PR、定时或全量构建。完成后从该次运行的 Artifacts 下载 ZIP、校验值和 upstream.json，产物保留 14 天，不自动发布 Release。最新版以 WinGet 收录的最高稳定版本为准。
+
+CI 使用 `<上游三段版本>.<workflow run number>` 作为 MSIX 版本。本地构建可通过 `-Revision` 指定末段；更新必须高于已安装包版本。不要为了降级而卸载含有需要保留数据的包。
+
+未来新增应用时，在 `packages/<包名>/` 提供 package.json、scripts/Build.ps1，并把包名加入 workflow 的 package.options。共用入口 scripts/Build-Package.ps1 只分派所选包。
 
 参考：[应用隔离](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-overview)、[隔离能力](https://learn.microsoft.com/en-us/windows/win32/secauthz/app-isolation-supported-capabilities)、[MSIX 虚拟化](https://learn.microsoft.com/en-us/windows/msix/desktop/flexible-virtualization)。

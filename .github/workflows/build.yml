@@ -1,5 +1,5 @@
 name: Build package on demand
-run-name: Build ${{ inputs.package }} from latest upstream
+run-name: Build ${{ inputs.package }} from latest WinGet manifest
 
 on:
   workflow_dispatch:
@@ -39,12 +39,13 @@ jobs:
           update: true
       - name: Validate sources and resolver
         run: ./tests/Test-Repository.ps1
-      - name: Download latest QQ and build selected package
+      - name: Download latest WinGet QQ and build selected package
         id: build
         env:
           SELECTED_PACKAGE: ${{ inputs.package }}
           BUILD_REVISION: ${{ github.run_number }}
           MSYS_LOCATION: ${{ steps.msys2.outputs.msys2-location }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           $compiler = Join-Path $env:MSYS_LOCATION 'mingw64/bin/gcc.exe'
           ./scripts/Build-Package.ps1 -Package $env:SELECTED_PACKAGE -Compiler $compiler -Revision ([int]$env:BUILD_REVISION)

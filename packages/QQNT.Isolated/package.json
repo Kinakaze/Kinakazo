@@ -2,7 +2,8 @@
   "name": "QQNT.Isolated",
   "displayName": "QQ 隔离版",
   "architecture": "x64",
-  "configUrl": "https://cdn-go.cn/qq-web/im.qq.com_new/latest/rainbow/windowsConfig.js",
+  "wingetId": "Tencent.QQ.NT",
+  "wingetPath": "manifests/t/Tencent/QQ/NT",
   "homepage": "https://im.qq.com/pcqq/index.shtml",
   "buildScript": "scripts/Build.ps1"
 }

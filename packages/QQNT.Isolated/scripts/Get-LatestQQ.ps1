@@ -11,8 +11,8 @@ $output = [IO.Path]::GetFullPath($OutputDirectory)
 if (Test-Path -LiteralPath $output) { throw 'Download directory must be new to prevent mixing QQ versions.' }
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $release = & (Join-Path $PSScriptRoot 'Resolve-QQ.ps1')
-Write-Host "Downloading official QQ $($release.Version) x64"
-Write-Host "Official installer URL: $($release.Url)"
+Write-Host "Downloading WinGet $($release.WingetId) $($release.WingetVersion) x64"
+Write-Host "WinGet installer URL: $($release.Url)"
 $installer = Join-Path $output 'QQ-installer.exe'
 $downloaded = $false
 for ($attempt=1; $attempt -le 3; $attempt++) {
@@ -27,17 +27,18 @@ for ($attempt=1; $attempt -le 3; $attempt++) {
 }
 if (-not $downloaded) { throw 'QQ download failed.' }
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
+$actualHash = (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
 $diagnostic = [pscustomobject]@{
     Release=$release; Length=(Get-Item -LiteralPath $installer).Length
     SignatureStatus=$signature.Status.ToString(); SignatureMessage=$signature.StatusMessage
-    Signer=$signature.SignerCertificate.Subject; Sha256=(Get-FileHash -LiteralPath $installer).Hash
+    Signer=$signature.SignerCertificate.Subject; Sha256=$actualHash
 }
 $diagnostic | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $output 'download-diagnostic.json') -Encoding UTF8
-if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?i)Tencent') {
+if ($actualHash -ne $release.InstallerSha256) {
     $diagnostic | ConvertTo-Json -Depth 5 | Write-Host
-    throw 'QQ installer must have a valid Tencent Authenticode signature.'
+    throw 'Downloaded QQ installer does not match the SHA-256 in the WinGet manifest.'
 }
-$release | Add-Member -NotePropertyName InstallerSha256 -NotePropertyValue (Get-FileHash -LiteralPath $installer -Algorithm SHA256).Hash
+$release | Add-Member -NotePropertyName SignatureStatus -NotePropertyValue $signature.Status.ToString()
 $release | Add-Member -NotePropertyName Signer -NotePropertyValue $signature.SignerCertificate.Subject
 $extract = Join-Path $output 'extracted'
 & $SevenZip x $installer "-o$extract" -y -bso0 -bsp0
@@ -54,7 +55,7 @@ $candidates = @(Get-ChildItem -LiteralPath $output -Recurse -File -Filter QQ.exe
 if ($candidates.Count -ne 1) { throw "Expected one complete QQ application root, found $($candidates.Count). The upstream installer layout may have changed." }
 $source = $candidates[0].DirectoryName
 $versions = @(Get-ChildItem -LiteralPath (Join-Path $source 'versions') -Directory | Where-Object Name -Match '^\d+\.\d+\.\d+-\d+$')
-if ($versions.Count -ne 1 -or -not $versions[0].Name.StartsWith($release.Version + '-')) { throw 'Extracted QQ version does not match official latest metadata.' }
+if ($versions.Count -ne 1 -or ($versions[0].Name -replace '-', '.') -ne $release.WingetVersion) { throw 'Extracted QQ version does not match the WinGet manifest.' }
 $release | Add-Member -NotePropertyName ApplicationVersion -NotePropertyValue $versions[0].Name
 $release | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $output 'upstream.json') -Encoding UTF8
 [pscustomobject]@{ SourceDirectory=$source; Metadata=$release }
