@@ -24,7 +24,7 @@ if ($VersionsJson -or -not $ManifestText) {
 }
 # Read only the scalar fields used by this package; unsupported YAML fails closed.
 function Scalar([string]$text, [string]$name) {
-    $matches = [regex]::Matches($text, '(?m)^[ \t]*' + [regex]::Escape($name) + ':[ \t]*([^\r\n]+)[ \t]*$')
+    $matches = [regex]::Matches($text, '(?m)^[ \t]*' + [regex]::Escape($name) + ':[ \t]*([^\r\n]+)[ \t]*\r?$')
     if ($matches.Count -ne 1) { throw "Expected exactly one $name in the WinGet manifest section." }
     $value = $matches[0].Groups[1].Value.Trim()
     if (($value.StartsWith('"') -and $value.EndsWith('"')) -or ($value.StartsWith("'") -and $value.EndsWith("'"))) { $value=$value.Substring(1,$value.Length-2) }

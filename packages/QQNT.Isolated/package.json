@@ -1,6 +1,6 @@
 {
   "name": "QQNT.Isolated",
-  "displayName": "QQ 隔离版",
+  "displayName": "QQNT.Isolated",
   "architecture": "x64",
   "wingetId": "Tencent.QQ.NT",
   "wingetPath": "manifests/t/Tencent/QQ/NT",

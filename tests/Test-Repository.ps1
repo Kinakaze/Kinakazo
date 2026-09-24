@@ -32,6 +32,9 @@ $valid = Manifest 'https://qqdl.gtimg.cn/qqfile/QQNT/9.9.99/release/test/QQ_9.9.
 $versions = '[{"name":"9.9.9.999","type":"dir"},{"name":"9.9.99.100","type":"dir"},{"name":"9.9.100-preview","type":"dir"}]'
 $resolved = & $resolve -ManifestText $valid -VersionsJson $versions
 if ($resolved.WingetVersion -ne '9.9.99.100' -or $resolved.Url -notlike '*x64_01.exe' -or $resolved.InstallerSha256 -ne ('A' * 64)) { throw 'WinGet version ordering or x64/hash resolution failed.' }
+$windowsText = ($valid -replace '\r?\n', "`r`n")
+$windowsResolved = & $resolve -ManifestText $windowsText -VersionsJson $versions
+if ($windowsResolved.InstallerSha256 -ne $resolved.InstallerSha256) { throw 'CRLF WinGet manifest parsing failed.' }
 $invalidCases = @(
     'not a WinGet manifest',
     (Manifest 'http://qqdl.gtimg.cn/QQ_9.9.99_x64.exe'),

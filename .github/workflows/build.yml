@@ -30,6 +30,8 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           persist-credentials: false
+      - name: Validate sources and resolver
+        run: ./tests/Test-Repository.ps1
       - name: Set up MinGW-w64
         id: msys2
         uses: msys2/setup-msys2@66cd2cce69caa17b53920067426061ca1de3a884 # v2
@@ -37,8 +39,6 @@ jobs:
           msystem: MINGW64
           install: mingw-w64-x86_64-gcc
           update: true
-      - name: Validate sources and resolver
-        run: ./tests/Test-Repository.ps1
       - name: Download latest WinGet QQ and build selected package
         id: build
         env:
